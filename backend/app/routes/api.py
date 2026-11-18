@@ -125,13 +125,19 @@ def haze():
     file = request.files.get("image")
     if file is None or not file.filename:
         raise ApiError("Choose an image to upload.", 400, {"image": "No file received."})
-    ext = file.filename.rsplit(".", 1)[-1].lower() if "." in file.filename else ""
-    if ext not in haze_analyzer.ALLOWED_EXTENSIONS:
-        raise ApiError("Only JPG, PNG or WebP images are accepted.", 415, {"image": "Unsupported file type."})
-    data = file.read(current_app.config["MAX_CONTENT_LENGTH"] + 1)  # processed in memory, never saved to disk
-    if len(data) > current_app.config["MAX_CONTENT_LENGTH"]:
-        raise ApiError(f"File is too large. The limit is {current_app.config['UPLOAD_LIMIT_MB']} MB.", 413)
-    return jsonify(haze_analyzer.analyze_image(data))
+    try:
+        ext = file.filename.rsplit(".", 1)[-1].lower() if "." in file.filename else ""
+        if ext not in haze_analyzer.ALLOWED_EXTENSIONS:
+            raise ApiError("Only JPG, PNG or WebP images are accepted.", 415, {"image": "Unsupported file type."})
+        data = file.read(current_app.config["MAX_CONTENT_LENGTH"] + 1)  # processed in memory, never saved to disk
+        if len(data) > current_app.config["MAX_CONTENT_LENGTH"]:
+            raise ApiError(f"File is too large. The limit is {current_app.config['UPLOAD_LIMIT_MB']} MB.", 413)
+        return jsonify(haze_analyzer.analyze_image(data))
+    finally:
+        try:
+            file.close()
+        except Exception:
+            pass
 
 
 @bp.post("/impact")

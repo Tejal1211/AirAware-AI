@@ -9,8 +9,16 @@ import os
 
 os.environ.setdefault("OPENCV_IO_MAX_IMAGE_PIXELS", str(30_000_000))  # guard against decompression bombs
 
-import cv2  # noqa: E402
-import numpy as np  # noqa: E402
+try:
+    import cv2  # noqa: E402
+    import numpy as np  # noqa: E402
+    CV2_AVAILABLE = True
+    _CV2_ERROR = None
+except Exception as _e:
+    cv2 = None
+    np = None
+    CV2_AVAILABLE = False
+    _CV2_ERROR = str(_e)
 
 from ..errors import ApiError  # noqa: E402
 
@@ -29,7 +37,9 @@ def _clip01(x: float) -> float:
     return float(min(1.0, max(0.0, x)))
 
 
-def _decode(data: bytes) -> np.ndarray:
+def _decode(data: bytes):
+    if not CV2_AVAILABLE:
+        raise ApiError(f"OpenCV image processing is unavailable ({_CV2_ERROR}). Please run: pip install 'numpy<2'", 503)
     if not has_valid_signature(data):
         raise ApiError("Upload a JPG, PNG or WebP photo.", 415)
     img = cv2.imdecode(np.frombuffer(data, np.uint8), cv2.IMREAD_COLOR)
