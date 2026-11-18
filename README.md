@@ -21,7 +21,7 @@ AirAware AI combines **real air-quality data** (Open-Meteo), a **deterministic, 
 
 Every recommendation shows **what to do, why, the expected effect, the effect type** (lowers your exposure / cuts emissions / both / awareness) and **its basis** (public-health guidance, your forecast, or general good practice).
 
-## Architecture
+# Architecture
 
 ```mermaid
 flowchart TD
