@@ -1,11 +1,17 @@
 import { useId } from 'react'
+import { AlertCircle, AlertTriangle, CheckCircle2, Clock, HelpCircle, Info, ShieldAlert, Sparkles, Tag, Zap } from 'lucide-react'
 import { TONE } from '../utils/format.js'
 
-export const Card = ({ title, children, className = '', as: Tag = 'section', ...rest }) => (
-  <Tag className={`card ${className}`} {...rest}>
-    {title && <h2 className="mb-3 text-lg font-bold">{title}</h2>}
+export const Card = ({ title, icon: Icon, children, className = '', as: TagElement = 'section', ...rest }) => (
+  <TagElement className={`card ${className}`} {...rest}>
+    {title && (
+      <div className="mb-3 flex items-center gap-2">
+        {Icon && <Icon className="h-5 w-5 text-pine" aria-hidden="true" />}
+        <h2 className="text-lg font-bold text-ink">{title}</h2>
+      </div>
+    )}
     {children}
-  </Tag>
+  </TagElement>
 )
 
 export function Field({ label, hint, error, children, id }) {
@@ -21,7 +27,11 @@ export function Field({ label, hint, error, children, id }) {
 
 export function TextField({ label, hint, error, ...props }) {
   const id = useId()
-  return <Field label={label} hint={hint} error={error} id={id}><input id={id} className="input" aria-invalid={!!error} aria-describedby={hint ? `${id}-hint` : undefined} {...props} /></Field>
+  return (
+    <Field label={label} hint={hint} error={error} id={id}>
+      <input id={id} className="input" aria-invalid={!!error} aria-describedby={hint ? `${id}-hint` : undefined} {...props} />
+    </Field>
+  )
 }
 
 export function SelectField({ label, hint, error, options, ...props }) {
@@ -39,37 +49,48 @@ export function CheckField({ label, hint, ...props }) {
   const id = useId()
   return (
     <div className="flex min-h-[44px] items-start gap-3">
-      <input id={id} type="checkbox" className="mt-1 h-6 w-6 shrink-0 accent-pine" {...props} />
-      <label htmlFor={id} className="text-base"><span className="font-semibold">{label}</span>{hint && <span className="hint block">{hint}</span>}</label>
+      <input id={id} type="checkbox" className="mt-1 h-5 w-5 shrink-0 rounded border-mist text-pine accent-pine focus:ring-pine" {...props} />
+      <label htmlFor={id} className="text-base">
+        <span className="font-semibold text-ink">{label}</span>
+        {hint && <span className="hint block">{hint}</span>}
+      </label>
     </div>
   )
 }
 
 export const Spinner = ({ text = 'Loading…' }) => (
   <div role="status" aria-live="polite" className="flex items-center gap-3 p-4 text-slate-800">
-    <span className="h-5 w-5 animate-spin rounded-full border-4 border-mist border-t-pine" aria-hidden="true" />{text}
+    <span className="h-5 w-5 animate-spin rounded-full border-4 border-mist border-t-pine" aria-hidden="true" />
+    <span className="font-medium">{text}</span>
   </div>
 )
 
 export const ErrorBox = ({ message, onRetry, children }) => (
-  <div role="alert" className="rounded-xl border-2 border-aqi-unhealthy bg-aqi-unhealthy-bg p-4">
-    <p className="font-bold text-aqi-unhealthy">Something needs attention</p>
-    <p className="mt-1">{message}</p>
+  <div role="alert" className="rounded-xl border-2 border-aqi-unhealthy bg-aqi-unhealthy-bg p-4 text-ink">
+    <div className="flex items-center gap-2">
+      <AlertTriangle className="h-5 w-5 text-aqi-unhealthy shrink-0" aria-hidden="true" />
+      <p className="font-bold text-aqi-unhealthy">Something needs attention</p>
+    </div>
+    <p className="mt-1 text-sm">{message}</p>
     <div className="mt-3 flex flex-wrap gap-2">
-      {onRetry && <button className="btn-secondary" onClick={onRetry}>Try again</button>}
+      {onRetry && <button className="btn-secondary text-sm" onClick={onRetry}>Try again</button>}
       {children}
     </div>
   </div>
 )
 
 export const EmptyState = ({ title, children }) => (
-  <div className="rounded-xl border border-dashed border-slate-500 bg-white p-6 text-center">
-    <p className="font-bold">{title}</p><p className="mt-1 text-slate-700">{children}</p>
+  <div className="rounded-xl border border-dashed border-slate-300 bg-white p-6 text-center">
+    <Info className="mx-auto mb-2 h-8 w-8 text-slate-400" aria-hidden="true" />
+    <p className="font-bold text-ink">{title}</p>
+    <p className="mt-1 text-sm text-slate-600">{children}</p>
   </div>
 )
 
 export const Pill = ({ tone = 'unknown', children }) => (
-  <span className={`inline-flex items-center rounded-full border px-3 py-0.5 text-sm font-semibold ${TONE[tone] || TONE.unknown}`}>{children}</span>
+  <span className={`inline-flex items-center rounded-full border px-3 py-0.5 text-xs font-semibold ${TONE[tone] || TONE.unknown}`}>
+    {children}
+  </span>
 )
 
 const EFFECT = {
@@ -82,28 +103,57 @@ const BASIS = { guideline: 'Based on public-health guidance', forecast: 'Based o
 
 export function RecCard({ r }) {
   const [label, cls] = EFFECT[r.effect_type] || EFFECT.awareness
+  const prioColors = {
+    High: 'bg-rose-100 text-rose-800 border-rose-300',
+    Medium: 'bg-amber-100 text-amber-800 border-amber-300',
+    Low: 'bg-slate-100 text-slate-800 border-slate-300',
+  }
+  const prioText = r.priority_label || (r.priority === 1 ? 'High' : r.priority === 2 ? 'Medium' : 'Low')
+
   return (
-    <article className="rounded-xl border border-mist bg-white p-4">
-      <div className="mb-2 flex flex-wrap items-center gap-2">
-        <h3 className="text-base font-bold">{r.title}</h3>
-        <span className={`rounded-full border px-2 py-0.5 text-xs font-semibold ${cls}`}>{label}</span>
+    <article className="rounded-xl border border-mist bg-white p-4 shadow-sm hover:shadow transition-shadow">
+      <div className="mb-2 flex flex-wrap items-center justify-between gap-2">
+        <h3 className="text-base font-bold text-ink">{r.title}</h3>
+        <div className="flex items-center gap-1.5">
+          <span className={`rounded-full border px-2 py-0.5 text-xs font-semibold ${cls}`}>{label}</span>
+          <span className={`rounded-full border px-2 py-0.5 text-xs font-bold ${prioColors[prioText] || prioColors.Medium}`}>
+            {prioText}
+          </span>
+        </div>
       </div>
-      <p>{r.action}</p>
-      <dl className="mt-3 space-y-2 text-sm">
-        <div><dt className="inline font-bold">Why: </dt><dd className="inline">{r.why}</dd></div>
-        <div><dt className="inline font-bold">Expected effect: </dt><dd className="inline">{r.expected_impact}</dd></div>
-      </dl>
-      <p className="mt-2 text-xs text-slate-700">{BASIS[r.basis] || r.basis}</p>
+      <p className="text-sm font-medium text-slate-800">{r.action}</p>
+
+      <div className="mt-3 space-y-1.5 rounded-lg bg-slate-50 p-3 text-xs text-slate-700">
+        <div><span className="font-bold text-ink">Why:</span> {r.reason || r.why}</div>
+        <div><span className="font-bold text-ink">Expected Benefit:</span> {r.benefit || r.expected_impact}</div>
+        {r.timing && (
+          <div className="flex items-center gap-1 pt-1 text-slate-600">
+            <Clock className="h-3.5 w-3.5" aria-hidden="true" />
+            <span><b>When:</b> {r.timing}</span>
+            {r.difficulty && <span className="ml-2">· <b>Cost/Effort:</b> {r.difficulty}</span>}
+          </div>
+        )}
+      </div>
+
+      <div className="mt-2.5 flex items-center justify-between text-xs text-slate-500">
+        <span>{BASIS[r.basis] || r.basis}</span>
+        {r.category && <span className="rounded bg-slate-100 px-1.5 py-0.5 font-medium">{r.category}</span>}
+      </div>
     </article>
   )
 }
 
-export const RecList = ({ items, empty }) =>
-  items?.length ? <div className="grid gap-3 md:grid-cols-2">{items.map((r) => <RecCard key={r.id} r={r} />)}</div> : <EmptyState title="Nothing to show yet">{empty}</EmptyState>
+export function RecList({ items, empty = 'No recommendations right now.' }) {
+  if (!items || items.length === 0) return <EmptyState title="Nothing to show">{empty}</EmptyState>
+  return <div className="grid gap-3 md:grid-cols-2">{items.map((r) => <RecCard key={r.id || r.title} r={r} />)}</div>
+}
 
-export const SampleBanner = ({ source }) =>
-  source?.is_sample ? (
-    <div role="note" className="rounded-xl border-2 border-aqi-usg bg-aqi-usg-bg p-3 font-semibold text-aqi-usg">
-      SAMPLE DATA – these numbers are made up for demonstration and do not describe real air quality.
+export const SampleBanner = ({ source }) => {
+  if (!source?.is_sample) return null
+  return (
+    <div role="note" className="flex items-center gap-2 rounded-xl border border-amber-300 bg-amber-50 p-3 text-sm font-semibold text-amber-900">
+      <Info className="h-4 w-4 shrink-0 text-amber-700" aria-hidden="true" />
+      <span>Showing <b>SAMPLE DATA</b> for testing and offline demonstration. Real live readings will appear when connected.</span>
     </div>
-  ) : null
+  )
+}

@@ -39,9 +39,27 @@ def geocode():
 
 @bp.get("/air-quality")
 def air():
-    lat, lon = v.validate_coordinates(*(_num(request.args.get(k)) for k in ("lat", "lon")))
+    raw_lat = request.args.get("latitude") if request.args.get("latitude") is not None else request.args.get("lat")
+    raw_lon = request.args.get("longitude") if request.args.get("longitude") is not None else request.args.get("lon")
+    lat, lon = v.validate_coordinates(*(_num(raw_lat), _num(raw_lon)))
     data = _air_for(lat, lon, request.args.get("demo") == "1")
     return jsonify({**data, "trend": decision_engine.compute_trend(data)})
+
+
+@bp.get("/forecast")
+def forecast():
+    raw_lat = request.args.get("latitude") if request.args.get("latitude") is not None else request.args.get("lat")
+    raw_lon = request.args.get("longitude") if request.args.get("longitude") is not None else request.args.get("lon")
+    lat, lon = v.validate_coordinates(*(_num(raw_lat), _num(raw_lon)))
+    data = _air_for(lat, lon, request.args.get("demo") == "1")
+    hours = decision_engine.future_hours(data, 48)
+    return jsonify({
+        "location": data["location"],
+        "hourly": hours,
+        "best_window": decision_engine.best_window(hours),
+        "worst_window": decision_engine.best_window(hours, worst=True),
+        "trend": decision_engine.compute_trend(data),
+    })
 
 
 def _num(raw):
@@ -60,7 +78,35 @@ def plan():
     return jsonify(decision_engine.build_plan(profile, data))
 
 
+@bp.post("/recommendations")
+def recommendations():
+    body = _json_body()
+    profile = v.validate_profile(body.get("profile"))
+    loc = profile["location"]
+    data = _air_for(loc["latitude"], loc["longitude"], body.get("demo") is True)
+    full_plan = decision_engine.build_plan(profile, data)
+    all_recs = (
+        full_plan["top_actions"]
+        + full_plan["planner"]["recommendations"]
+        + full_plan["indoor"]["recommendations"]
+        + full_plan["alternatives"]
+    )
+    seen = set()
+    deduped = []
+    for r in all_recs:
+        if r["title"] not in seen:
+            seen.add(r["title"])
+            deduped.append(r)
+    return jsonify({
+        "recommendations": deduped,
+        "risk_level": full_plan["risk"],
+        "us_aqi": full_plan["air"]["current"]["us_aqi"],
+        "headline": full_plan["headline"]
+    })
+
+
 @bp.post("/assistant")
+@bp.post("/assistant/chat")
 @rate_limit("assistant", 20, 3600)
 def assistant_route():
     body = _json_body()
@@ -73,6 +119,7 @@ def assistant_route():
 
 
 @bp.post("/haze/analyze")
+@bp.post("/vision/analyze")
 @rate_limit("haze", 30, 3600)
 def haze():
     file = request.files.get("image")
@@ -88,6 +135,7 @@ def haze():
 
 
 @bp.post("/impact")
+@bp.post("/impact/calculate")
 def impact_route():
     body = _json_body()
     clean = v.validate_impact(body)
@@ -99,11 +147,13 @@ def impact_route():
 
 
 @bp.get("/reports")
+@bp.get("/community/reports")
 def reports_list():
     return jsonify(reports.list_reports(request.args.get("area", "")))
 
 
 @bp.post("/reports")
+@bp.post("/community/reports")
 @rate_limit("reports", 10, 3600)
 def reports_create():
     return jsonify(reports.add_report(v.validate_report(_json_body()))), 201

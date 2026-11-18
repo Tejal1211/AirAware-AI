@@ -139,3 +139,37 @@ def test_security_headers_and_cors(client):
     r = client.get("/api/health", headers={"Origin": "http://localhost:5173"})
     assert r.headers["X-Content-Type-Options"] == "nosniff" and r.headers["Access-Control-Allow-Origin"] == "http://localhost:5173"
     assert "Access-Control-Allow-Origin" not in client.get("/api/health", headers={"Origin": "https://evil.example"}).headers
+
+
+def test_forecast_and_recommendations_endpoints(client, profile):
+    r_fc = client.get("/api/forecast?latitude=28.61&longitude=77.21&demo=1")
+    assert r_fc.status_code == 200
+    assert "hourly" in r_fc.json and "best_window" in r_fc.json and "worst_window" in r_fc.json
+
+    r_rec = post(client, "/api/recommendations", {"profile": profile, "demo": True})
+    assert r_rec.status_code == 200
+    assert "recommendations" in r_rec.json and len(r_rec.json["recommendations"]) > 0
+    sample_rec = r_rec.json["recommendations"][0]
+    for key in ("title", "action", "reason", "timing", "benefit", "category", "priority", "difficulty", "assumptions"):
+        assert key in sample_rec, f"Missing key {key} in recommendation"
+
+
+def test_api_aliases(client, profile, clear_image):
+    # Assistant alias
+    r_chat = post(client, "/api/assistant/chat", {"profile": profile, "question": "What is the air like?", "demo": True})
+    assert r_chat.status_code == 200 and "answer" in r_chat.json
+
+    # Vision alias
+    r_vis = client.post("/api/vision/analyze", data={"image": (io.BytesIO(clear_image), "photo.png")}, content_type="multipart/form-data")
+    assert r_vis.status_code == 200 and "clarity_score" in r_vis.json
+
+    # Impact alias
+    r_imp = post(client, "/api/impact/calculate", {
+        "emissions": {"from_mode": "car_petrol", "to_mode": "bus", "one_way_km": 10, "days_per_week": 5},
+        "location": {"latitude": 28.6, "longitude": 77.2}, "demo": True
+    })
+    assert r_imp.status_code == 200 and "emissions" in r_imp.json
+
+    # Community reports alias
+    r_rep = client.get("/api/community/reports")
+    assert r_rep.status_code == 200 and "reports" in r_rep.json

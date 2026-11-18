@@ -20,10 +20,56 @@ BLOCKS = (("Morning commute and school run", 7, 10), ("Midday", 10, 16), ("Eveni
 
 
 # ------------------------------------------------------------------ helpers
-def rec(id_, area, title, action, why, impact, effect_type, basis, priority=2) -> dict:
-    """Build a recommendation. effect_type: personal_exposure | emission_reduction | both | awareness."""
-    return {"id": id_, "area": area, "title": title, "action": action, "why": why,
-            "expected_impact": impact, "effect_type": effect_type, "basis": basis, "priority": priority}
+PRIORITY_NAMES = {1: "High", 2: "Medium", 3: "Low"}
+CATEGORY_MAP = {
+    "commute": "Travel",
+    "school": "Travel",
+    "work": "Indoor",
+    "exercise": "Outdoor",
+    "ventilation": "Indoor",
+    "cooking": "Indoor",
+    "dust": "Indoor",
+    "filtration": "Indoor",
+    "alternatives": "Sustainability",
+    "community": "Sustainability",
+}
+
+
+def rec(id_, area, title, action, why, impact, effect_type, basis, priority=2, timing=None, difficulty=None, assumptions=None) -> dict:
+    """Build a structured recommendation with both master prompt and backward-compatible fields."""
+    cat = CATEGORY_MAP.get(area, "Indoor")
+    prio_label = PRIORITY_NAMES.get(priority, "Medium")
+    time_val = timing or ("Morning peak (07:00-10:00)" if area in ("commute", "school") else (
+        "During cleanest daytime slot" if area in ("exercise", "ventilation") else (
+            "During and after food prep" if area == "cooking" else (
+                "Continuous indoors" if area == "filtration" else "Whenever applicable"
+            )
+        )
+    ))
+    diff_val = difficulty or ("Medium" if "purifier" in id_ or "carpool" in id_ else ("Low" if "transit" in id_ or "seal" in id_ else "Free"))
+    assump = assumptions or ["Based on US EPA AQI breakpoints, WHO 2021 air quality guidelines, and empirical indoor/outdoor infiltration factors."]
+    return {
+        # Master Prompt schema fields
+        "title": title,
+        "action": action,
+        "reason": why,
+        "timing": time_val,
+        "benefit": impact,
+        "category": cat,
+        "priority": priority,  # keep int for numeric comparisons and test assertions
+        "priority_label": prio_label,
+        "difficulty": diff_val,
+        "estimated_impact": impact,
+        "assumptions": assump,
+        # Legacy/app fields
+        "id": id_,
+        "area": area,
+        "why": why,
+        "expected_impact": impact,
+        "effect_type": effect_type,
+        "basis": basis,
+        "priority_level": priority,
+    }
 
 
 def is_sensitive(household: dict) -> bool:
@@ -271,19 +317,31 @@ def indoor_recs(profile: dict, air: dict, lvl: dict, vent_window: dict | None) -
                     "Dry sweeping lifts settled dust back into the air, and smoke from coils and incense adds fine particles indoors.",
                     "Lowers resuspended dust and removes an easy-to-avoid indoor source of particles.", "personal_exposure", "general_practice", 3))
 
-    # filtration
+    # filtration & maintenance
     if ind["has_purifier"]:
         recs.append(rec("filter-use", "filtration", "Run your purifier smartly",
                         "Keep it running in the room where you spend most time, on a higher setting during the worst hours, with doors closed. Check and replace filters as the maker advises.",
                         "A purifier only helps when the filter is fresh and the room is not constantly being refilled with outdoor air.",
                         "In a closed room, a correctly sized HEPA purifier can lower indoor particle levels; results depend on room size and filter condition.",
-                        "personal_exposure", "general_practice", 2 if (eff or 0) >= 2 else 3))
+                        "personal_exposure", "general_practice", 2 if (eff or 0) >= 2 else 3, timing="Continuous in closed room", difficulty="Free"))
+        recs.append(rec("filter-maint", "filtration", "Maintain filters on schedule",
+                        "Vacuum or rinse the mesh pre-filter every 3-4 weeks to remove coarse hair and dust. Inspect the HEPA cartridge and replace every 6-12 months. Never wash true HEPA paper filters.",
+                        "Clogged pre-filters restrict airflow and drop the Clean Air Delivery Rate (CADR).",
+                        "Maintains manufacturer-rated particle capture efficiency and extends motor lifespan.",
+                        "personal_exposure", "general_practice", 3, timing="Monthly check", difficulty="Low"))
     elif (eff or 0) >= 2 and (is_sensitive(hh) or (eff or 0) >= 3):
         recs.append(rec("filter-get", "filtration", "Consider a purifier for the bedroom",
                         "A portable HEPA purifier sized to the room (check its clean-air delivery rate, CADR) is worth considering for the room where the household sleeps. Avoid devices that make ozone on purpose.",
                         f"AQI is {aqi} and your home has no purifier. Sleeping hours are the longest continuous time at home.",
                         "Can lower indoor particles in that room when doors and windows stay closed. It does nothing for outdoor air or emissions.",
-                        "personal_exposure", "general_practice", 2))
+                        "personal_exposure", "general_practice", 2, timing="Before winter peak", difficulty="Medium"))
+
+    # Evidence-based indoor advice
+    recs.append(rec("houseplant-reality", "filtration", "Rely on filtration, not houseplants, for PM2.5",
+                    "Keep houseplants for greenery and well-being, but do not rely on them to clean particulate smog. Use certified mechanical HEPA filtration for fine particles.",
+                    "Controlled research demonstrates that potted houseplants remove virtually no ambient PM2.5 or gaseous pollutants at typical residential air-exchange rates.",
+                    "Clarifies effective protection and prevents a false sense of indoor safety.",
+                    "awareness", "guideline", 3, timing="Ongoing awareness", difficulty="Free"))
     return recs
 
 
@@ -336,38 +394,174 @@ def community_recs(lvl: dict) -> list[dict]:
 # ------------------------------------------------------------------ alerts
 def build_alerts(profile: dict, air: dict, lvl: dict, trend: dict) -> list[dict]:
     sensitive = is_sensitive(profile["household"])
+    cur = air["current"]
+    cur_pm25 = cur.get("pm2_5")
     hours = [h for h in future_hours(air, 24) if h["us_aqi"] is not None]
     alerts = []
     if not hours:
         return alerts
+
+    # Peak AQI alerts
     peak = max(hours, key=lambda h: h["us_aqi"])
     peak_lvl = risk_level(peak["us_aqi"], sensitive)
     when = f"{_label_day(peak['time'], air['current']['time'])} around {peak['time'][11:16]}"
     if peak_lvl["index"] >= 4:
-        alerts.append({"id": "peak-severe", "severity": "danger", "title": "Very high pollution expected",
-                       "message": f"AQI may reach about {peak['us_aqi']} ({peak_lvl['category']['label']}) {when}.",
-                       "why": "The forecast for the next 24 hours crosses the 'Very unhealthy' range.",
-                       "action": "Plan indoor activities, keep windows closed and run your purifier if you have one."})
+        alerts.append({"id": "peak-severe", "severity": "danger", "title": "Severe Smog Alert",
+                       "message": f"AQI is forecast to reach {peak['us_aqi']} ({peak_lvl['category']['label']}) {when}.",
+                       "why": "The forecast for the next 24 hours crosses into the 'Very unhealthy' or 'Hazardous' range.",
+                       "action": "Avoid non-essential outdoor trips, keep windows sealed, and run HEPA filtration continuously."})
     elif peak_lvl["index"] >= 3:
-        alerts.append({"id": "peak-high", "severity": "warning", "title": "Unhealthy air expected",
+        alerts.append({"id": "peak-high", "severity": "warning", "title": "Unhealthy Air Expected",
                        "message": f"AQI may reach about {peak['us_aqi']} ({peak_lvl['category']['label']}) {when}.",
                        "why": "The forecast for the next 24 hours reaches the 'Unhealthy' range.",
-                       "action": "Move outdoor exercise and school sport away from that time."})
+                       "action": "Move outdoor exercise and school sports away from peak hours."})
     elif peak_lvl["index"] == 2:
-        alerts.append({"id": "peak-usg", "severity": "info", "title": "Sensitive groups: take care",
+        alerts.append({"id": "peak-usg", "severity": "info", "title": "Sensitive Groups: Take Care",
                        "message": f"AQI may reach about {peak['us_aqi']} {when}." + (" Your household includes sensitive members." if sensitive else ""),
                        "why": "Forecast reaches 'Unhealthy for sensitive groups' or higher for your household.",
                        "action": "Shorten outdoor exertion around that time."})
+
+    # High PM2.5 spike alert
+    if cur_pm25 is not None and cur_pm25 >= 60 and not any(a["id"] == "peak-severe" for a in alerts):
+        alerts.append({"id": "pm25-spike", "severity": "warning", "title": "Elevated Fine Particles (PM2.5)",
+                       "message": f"Current PM2.5 is {cur_pm25} µg/m³ (approx {round(cur_pm25 / aqi_mod.WHO_PM25_24H, 1)}× the WHO 24-hr guideline).",
+                       "why": "Fine particles penetrate deep into alveolar lung tissue and the bloodstream.",
+                       "action": "Wear an N95 respirator if commuting on foot, cycle, or two-wheeler."})
+
+    # Deteriorating trend alert
     if trend["direction"] == "rising" and not any(a["severity"] == "danger" for a in alerts):
-        alerts.append({"id": "trend-rising", "severity": "info", "title": "Air quality is getting worse",
-                       "message": trend["text"], "why": "Recent hours are cleaner than the next several hours.",
-                       "action": "Do outdoor tasks soon if they are needed today."})
+        alerts.append({"id": "trend-rising", "severity": "info", "title": "Air Quality Deteriorating",
+                       "message": trend["text"], "why": "Recent hours were cleaner than the upcoming forecast.",
+                       "action": "Complete essential outdoor errands early before smog builds up."})
+
+    # Exercise alert
+    if profile["lifestyle"]["outdoor_exercise"] == "regular" and (lvl["index"] or 0) >= 3:
+        alerts.append({"id": "exercise-caution", "severity": "warning", "title": "Outdoor Exercise Inadvisable",
+                       "message": "High particulate levels make strenuous outdoor cardio counter-productive today.",
+                       "why": "Heavy aerobic breathing bypasses nasal filters and multiplies total particulate deposition.",
+                       "action": "Switch to indoor bodyweight training, yoga, or an indoor gym."})
+
+    # All-clear condition
     if lvl["index"] is not None and lvl["index"] <= 1 and not alerts:
-        alerts.append({"id": "all-clear", "severity": "ok", "title": "No smog alert",
+        alerts.append({"id": "all-clear", "severity": "ok", "title": "All Clear: Favourable Air",
                        "message": "Forecast stays in a comfortable range for the next 24 hours.",
-                       "why": "No hour in the next 24 reaches 'Unhealthy for sensitive groups'.",
-                       "action": "Enjoy outdoor time; check back if conditions change."})
+                       "why": "No forecast hour reaches 'Unhealthy for sensitive groups'.",
+                       "action": "Enjoy outdoor activities and ventilate your home freely."})
     return alerts
+
+
+def build_daily_schedule(profile: dict, air: dict, lvl: dict, blocks: list[dict], window: dict | None, vent_window: dict | None) -> list[dict]:
+    """Generates the comprehensive 8-phase smart daily routine schedule per Challenge Module 4."""
+    eff = lvl["index"] if lvl["index"] is not None else 1
+    aqi_val = lvl["aqi"] or 50
+    cat_label = lvl["category"]["label"]
+    commute = profile["commute"]
+    ind = profile["indoor"]
+    clean_win = f"{window['start'][11:16]}–{window['end']}" if window else "Midday (12:00–14:00)"
+    vent_win = f"{vent_window['start'][11:16]}–{vent_window['end']}" if vent_window else "Afternoon"
+
+    items = []
+
+    # 1. Morning Routine
+    m_act = "Keep windows sealed against nocturnal/morning smog inversion. Check today's AQI before opening doors." if eff >= 2 else "Open windows for a gentle morning air exchange. Check the forecast before heading out."
+    items.append({
+        "phase": "Morning Routine",
+        "time": "06:00 – 08:30",
+        "status": "Cautious" if eff >= 2 else "Optimal",
+        "action": m_act,
+        "why": "Morning temperature inversions frequently trap vehicular emissions and ground smoke near the surface.",
+        "indoor_alternative": "Do morning stretches or light mobility indoors away from road-facing windows."
+    })
+
+    # 2. Travel & Commute Precautions
+    if commute["mode"] in EXPOSED_MODES:
+        c_act = f"Wear a well-fitted N95/FFP2 respirator. Avoid busy multi-lane corridors. If possible, travel closer to {clean_win}." if eff >= 2 else "Travel as usual. Walking or cycling offers active fitness and zero emissions."
+    else:
+        c_act = "Set car ventilation to internal recirculation on arterial roads; keep bus/train windows closed during peak traffic." if eff >= 2 else "Commute as usual. Public transit lowers your carbon footprint."
+    items.append({
+        "phase": "Travel & Commute",
+        "time": "08:30 – 10:30",
+        "status": "High Exposure" if eff >= 3 else ("Moderate" if eff == 2 else "Normal"),
+        "action": c_act,
+        "why": f"Current AQI is {aqi_val} ({cat_label}). Traffic corridors have concentrated ultrafine particulates and toxic NO2.",
+        "indoor_alternative": "Coordinate flexible check-in or partial work-from-home during winter smog spikes."
+    })
+
+    # 3. Outdoor Exercise Suggestions
+    if eff >= 3:
+        ex_act = "Avoid outdoor running or intense sports today. Shift workouts entirely indoors."
+        ex_alt = "Indoor bodyweight circuit, yoga, or indoor gym workout."
+    elif eff == 2:
+        ex_act = f"Limit outdoor exercise to moderate intensity strictly within the cleanest slot ({clean_win})."
+        ex_alt = "Indoor gym workout or brisk indoor walking."
+    else:
+        ex_act = f"Outdoor exercise is safe and encouraged today. Ideal outdoor window: {clean_win}."
+        ex_alt = "Outdoor jogging, park sports, or cycling."
+    items.append({
+        "phase": "Exercise & Fitness",
+        "time": clean_win,
+        "status": "Move Indoors" if eff >= 3 else ("Restricted" if eff == 2 else "Safe"),
+        "action": ex_act,
+        "why": "High-intensity aerobic respiration increases particle inhalation volume up to tenfold into deep lung tissue.",
+        "indoor_alternative": ex_alt
+    })
+
+    # 4. School and Work Precautions
+    sw_act = "Keep classroom and office windows closed during peak traffic hours. Sensitive children should avoid heavy playground exertion." if eff >= 2 else "Normal school and workplace routine. Keep indoor spaces well-ventilated."
+    items.append({
+        "phase": "School & Workplace",
+        "time": "10:30 – 16:00",
+        "status": "Protection Needed" if eff >= 2 else "Normal",
+        "action": sw_act,
+        "why": "Children breathe more air per kilogram of body weight than adults, making them especially vulnerable to elevated PM2.5.",
+        "indoor_alternative": "Move school recess or physical education to indoor gymnasiums or sheltered halls."
+    })
+
+    # 5. Indoor Activity Alternatives
+    ind_act = "Encourage reading, board games, indoor hobbies, and indoor play instead of outdoor parks during smog spikes." if eff >= 2 else "Enjoy both indoor and outdoor recreational activities as desired."
+    items.append({
+        "phase": "Indoor Activity Alternatives",
+        "time": "14:00 – 17:00",
+        "status": "Recommended" if eff >= 2 else "Optional",
+        "action": ind_act,
+        "why": "Limiting cumulative daytime outdoor hours directly reduces cumulative particle exposure (µg/m³ × hours).",
+        "indoor_alternative": "Community centers, indoor play areas, libraries, or home creative projects."
+    })
+
+    # 6. Evening Routine
+    ev_act = "Close windows before evening traffic peak begins. Avoid open roadside food stalls near congested intersections." if eff >= 2 else "Normal evening routine. Great time for a neighbourhood walk."
+    items.append({
+        "phase": "Evening Routine",
+        "time": "17:00 – 19:30",
+        "status": "Smog Inversion Risk" if eff >= 2 else "Clear",
+        "action": ev_act,
+        "why": "Evening rush hour coincides with dropping ambient temperatures, concentrating vehicle exhaust close to ground level.",
+        "indoor_alternative": "Indoor cooking with exhaust hood running; indoor family time."
+    })
+
+    # 7. Natural Ventilation Recommendations
+    vent_act = f"Air the home briefly for 10-15 minutes during the cleanest forecast window ({vent_win}), then reseal." if eff >= 2 else "Keep windows open for continuous natural ventilation."
+    items.append({
+        "phase": "Ventilation Window",
+        "time": vent_win,
+        "status": "Strategic Airing",
+        "action": vent_act,
+        "why": "Controlled short airing purges indoor CO2 and cooking moisture while minimizing outdoor particulate intrusion.",
+        "indoor_alternative": "Use an energy recovery ventilator (ERV) or standalone HEPA purifier on continuous mode."
+    })
+
+    # 8. Night-Time Indoor Environment Guidance
+    n_act = "Keep bedroom windows closed. Run a HEPA air purifier on quiet night mode in sleeping quarters." if ind["has_purifier"] else ("Keep bedroom windows tightly closed and seal door thresholds with a draft stopper." if eff >= 2 else "Ventilate bedroom before sleep for fresh cool air.")
+    items.append({
+        "phase": "Night-Time Indoor Care",
+        "time": "21:30 – 06:00",
+        "status": "Protected Sleep",
+        "action": n_act,
+        "why": "Sleep represents 7-9 hours of continuous breathing in one microenvironment. Maintaining low bedroom PM2.5 aids cardiovascular recovery.",
+        "indoor_alternative": "Ensure the bedroom door is closed to maintain the filtered clean air zone overnight."
+    })
+
+    return items
 
 
 # ------------------------------------------------------------------ top level
@@ -388,6 +582,7 @@ def build_plan(profile: dict, air: dict) -> dict:
     alternatives = alternative_recs(profile, lvl)
     community = community_recs(lvl)
     alerts = build_alerts(profile, air, lvl, trend)
+    daily_schedule = build_daily_schedule(profile, air, lvl, blocks, window, vent_window)
     top = sorted(planner + indoor, key=lambda r: r["priority"])[:3]
     if lvl["index"] is None:
         headline = "Current air-quality data is incomplete for this location, so advice is limited."
@@ -398,7 +593,13 @@ def build_plan(profile: dict, air: dict) -> dict:
     return {
         "air": air, "risk": {**lvl, "sensitive_household": sensitive}, "trend": trend, "alerts": alerts, "headline": headline,
         "top_actions": top,
-        "planner": {"recommendations": planner, "blocks": blocks, "best_window": window, "worst_window": worst},
+        "planner": {
+            "recommendations": planner,
+            "blocks": blocks,
+            "best_window": window,
+            "worst_window": worst,
+            "daily_schedule": daily_schedule,
+        },
         "indoor": {"recommendations": indoor, "best_ventilation_window": vent_window},
         "alternatives": alternatives,
         "community": community, "profile_used": profile, "disclaimer": DISCLAIMER,

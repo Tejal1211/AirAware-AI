@@ -86,6 +86,10 @@ def validate_location(data: dict, c: _Collector) -> dict:
             "longitude": None if lon is None else round(float(lon), 2)}
 
 
+SCHEDULE_TYPES = ("regular_9_5", "morning_shift", "evening_shift", "flexible", "work_from_home")
+ACTIVITY_PREFS = ("balanced", "mostly_indoor", "mostly_outdoor")
+
+
 def validate_profile(data) -> dict:
     """Validate the onboarding profile. Contains no names or identifiers by design."""
     if not isinstance(data, dict):
@@ -93,12 +97,18 @@ def validate_profile(data) -> dict:
     c = _Collector()
     location = validate_location(data, c)
     hh, cm, ls, ind = (_section(data, k, c) for k in ("household", "commute", "lifestyle", "indoor"))
+    adults = c.number(hh, "adults", "household.adults", 0, 12, 1, integer=True)
+    children = c.number(hh, "children", "household.children", 0, 12, 0, integer=True)
+    older_adults = c.number(hh, "older_adults", "household.older_adults", 0, 12, 0, integer=True)
+    total_calc = (adults or 0) + (children or 0) + (older_adults or 0)
     profile = {
         "location": location,
+        "language": clean_text(data.get("language", "English"), 20) or "English",
         "household": {
-            "adults": c.number(hh, "adults", "household.adults", 0, 12, 1, integer=True),
-            "children": c.number(hh, "children", "household.children", 0, 12, 0, integer=True),
-            "older_adults": c.number(hh, "older_adults", "household.older_adults", 0, 12, 0, integer=True),
+            "adults": adults,
+            "children": children,
+            "older_adults": older_adults,
+            "total_members": max(1, total_calc),
             "respiratory_condition": c.boolean(hh, "respiratory_condition", "household.respiratory_condition"),
         },
         "commute": {
@@ -108,6 +118,8 @@ def validate_profile(data) -> dict:
         "lifestyle": {
             "outdoor_exercise": c.choice(ls, "outdoor_exercise", "lifestyle.outdoor_exercise", EXERCISE_LEVELS, "occasional"),
             "works_from_home": c.boolean(ls, "works_from_home", "lifestyle.works_from_home"),
+            "schedule": c.choice(ls, "schedule", "lifestyle.schedule", SCHEDULE_TYPES, "regular_9_5"),
+            "activity_preference": c.choice(ls, "activity_preference", "lifestyle.activity_preference", ACTIVITY_PREFS, "balanced"),
         },
         "indoor": {
             "cooking_fuel": c.choice(ind, "cooking_fuel", "indoor.cooking_fuel", COOKING_FUELS, "lpg"),
