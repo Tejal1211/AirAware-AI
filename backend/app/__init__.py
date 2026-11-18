@@ -20,19 +20,35 @@ def create_app(overrides: dict | None = None) -> Flask:
     @app.after_request
     def _security_headers(resp):
         origin = None
-        if request.headers.get("Origin") in app.config["ALLOWED_ORIGINS"]:
-            origin = request.headers["Origin"]
+        req_origin = request.headers.get("Origin")
+        if req_origin and req_origin in app.config.get("ALLOWED_ORIGINS", []):
+            origin = req_origin
         if origin:
             resp.headers["Access-Control-Allow-Origin"] = origin
-            resp.headers["Access-Control-Allow-Headers"] = "Content-Type"
+            resp.headers["Access-Control-Allow-Headers"] = "Content-Type, Authorization"
             resp.headers["Access-Control-Allow-Methods"] = "GET, POST, OPTIONS"
+            resp.headers["Access-Control-Max-Age"] = "86400"
             resp.headers["Vary"] = "Origin"
+
+        # Comprehensive OWASP & Industry-Standard Security Headers
         resp.headers["X-Content-Type-Options"] = "nosniff"
-        resp.headers["Referrer-Policy"] = "no-referrer"
+        resp.headers["X-Frame-Options"] = "DENY"
+        resp.headers["X-XSS-Protection"] = "1; mode=block"
+        resp.headers["Referrer-Policy"] = "strict-origin-when-cross-origin"
+        resp.headers["Cross-Origin-Opener-Policy"] = "same-origin"
+        resp.headers["Cross-Origin-Resource-Policy"] = "same-origin"
+        resp.headers["Permissions-Policy"] = "accelerometer=(), camera=(), geolocation=(self), gyroscope=(), magnetometer=(), microphone=(), payment=(), usb=()"
+        resp.headers["Strict-Transport-Security"] = "max-age=31536000; includeSubDomains; preload"
+
         if request.path.startswith("/api"):
-            resp.headers["Cache-Control"] = "no-store"
+            resp.headers["Cache-Control"] = "no-store, no-cache, must-revalidate, max-age=0"
+            resp.headers["Pragma"] = "no-cache"
+            resp.headers.setdefault("Content-Security-Policy", "default-src 'none'; frame-ancestors 'none'")
         else:
-            resp.headers.setdefault("Content-Security-Policy", "default-src 'self'; img-src 'self' data: blob:; style-src 'self' 'unsafe-inline'; frame-ancestors 'none'")
+            resp.headers.setdefault(
+                "Content-Security-Policy",
+                "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; font-src 'self'; connect-src 'self' https://air-quality-api.open-meteo.com https://geocoding-api.open-meteo.com; frame-ancestors 'none'"
+            )
         return resp
 
     @app.get("/", defaults={"path": ""})

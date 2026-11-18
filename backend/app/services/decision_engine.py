@@ -8,20 +8,26 @@ Sensitivity rule (documented assumption): households with children, older adults
 heart/lung condition are treated one level more cautiously when AQI is in the "Moderate" band. This is
 a conservative rule of thumb, not a clinical threshold.
 """
+from typing import Any
 from datetime import datetime
 
 from . import aqi as aqi_mod
 
-DISCLAIMER = ("General guidance based on air-quality data and public-health rules of thumb. "
-              "It is not medical advice. Follow your clinician's advice if you have a heart or lung condition.")
-EXPOSED_MODES = ("walk", "bicycle", "two_wheeler")
-LEVEL_NAMES = ("good", "moderate", "caution", "avoid", "stay_in", "stay_in")
-BLOCKS = (("Morning commute and school run", 7, 10), ("Midday", 10, 16), ("Evening commute and play", 16, 20))
-
+DISCLAIMER: str = (
+    "General guidance based on air-quality data and public-health rules of thumb. "
+    "It is not medical advice. Follow your clinician's advice if you have a heart or lung condition."
+)
+EXPOSED_MODES: tuple[str, ...] = ("walk", "bicycle", "two_wheeler")
+LEVEL_NAMES: tuple[str, ...] = ("good", "moderate", "caution", "avoid", "stay_in", "stay_in")
+BLOCKS: tuple[tuple[str, int, int], ...] = (
+    ("Morning commute and school run", 7, 10),
+    ("Midday", 10, 16),
+    ("Evening commute and play", 16, 20),
+)
 
 # ------------------------------------------------------------------ helpers
-PRIORITY_NAMES = {1: "High", 2: "Medium", 3: "Low"}
-CATEGORY_MAP = {
+PRIORITY_NAMES: dict[int, str] = {1: "High", 2: "Medium", 3: "Low"}
+CATEGORY_MAP: dict[str, str] = {
     "commute": "Travel",
     "school": "Travel",
     "work": "Indoor",
@@ -35,8 +41,39 @@ CATEGORY_MAP = {
 }
 
 
-def rec(id_, area, title, action, why, impact, effect_type, basis, priority=2, timing=None, difficulty=None, assumptions=None) -> dict:
-    """Build a structured recommendation with both master prompt and backward-compatible fields."""
+def rec(
+    id_: str,
+    area: str,
+    title: str,
+    action: str,
+    why: str,
+    impact: str,
+    effect_type: str,
+    basis: str,
+    priority: int = 2,
+    timing: str | None = None,
+    difficulty: str | None = None,
+    assumptions: list[str] | None = None
+) -> dict[str, Any]:
+    """Build a structured recommendation with both master prompt and backward-compatible fields.
+
+    Args:
+        id_: Unique recommendation identifier.
+        area: Action domain (commute, exercise, indoor, etc.).
+        title: Short imperative title.
+        action: Specific recommended action text.
+        why: Scientific or practical rationale.
+        impact: Expected positive effect.
+        effect_type: personal_exposure, emission_reduction, both, or awareness.
+        basis: Source basis (WHO, EPA, empirical).
+        priority: 1 (High), 2 (Medium), or 3 (Low).
+        timing: Time of day to perform action.
+        difficulty: Practical barrier or cost.
+        assumptions: Underlying scientific assumptions.
+
+    Returns:
+        Structured recommendation dictionary.
+    """
     cat = CATEGORY_MAP.get(area, "Indoor")
     prio_label = PRIORITY_NAMES.get(priority, "Medium")
     time_val = timing or ("Morning peak (07:00-10:00)" if area in ("commute", "school") else (
@@ -72,12 +109,28 @@ def rec(id_, area, title, action, why, impact, effect_type, basis, priority=2, t
     }
 
 
-def is_sensitive(household: dict) -> bool:
+def is_sensitive(household: dict[str, Any]) -> bool:
+    """Check if household includes children, elderly, or individuals with respiratory conditions.
+
+    Args:
+        household: Household composition profile.
+
+    Returns:
+        bool: True if elevated vulnerability rule applies.
+    """
     return bool(household["children"] or household["older_adults"] or household["respiratory_condition"])
 
 
-def risk_level(aqi: float | None, sensitive: bool) -> dict:
-    """Map AQI + household sensitivity to an effective level index (0-5)."""
+def risk_level(aqi: float | None, sensitive: bool) -> dict[str, Any]:
+    """Map AQI and household sensitivity to an adjusted risk tier (0-5).
+
+    Args:
+        aqi: Numerical US AQI.
+        sensitive: Whether household has vulnerable members.
+
+    Returns:
+        Risk level dictionary with effective level index and sensitivity adjustment flag.
+    """
     cat = aqi_mod.categorize(aqi)
     if cat["index"] is None:
         return {"index": None, "name": "unknown", "aqi": None, "category": cat, "adjusted": False}
@@ -87,26 +140,76 @@ def risk_level(aqi: float | None, sensitive: bool) -> dict:
     return {"index": eff, "name": LEVEL_NAMES[eff], "aqi": aqi, "category": cat, "adjusted": adjusted}
 
 
-def _mean(values):
+def _mean(values: Any) -> float | None:
+    """Compute arithmetic mean of non-null numeric values rounded to 1 decimal place.
+
+    Args:
+        values: Iterable of numbers or None.
+
+    Returns:
+        float mean or None if no valid numbers present.
+    """
     vals = [v for v in values if v is not None]
     return round(sum(vals) / len(vals), 1) if vals else None
 
 
-def future_hours(air: dict, hours: int = 24) -> list[dict]:
-    """Forecast entries from the current hour onward (next `hours` hours)."""
+def future_hours(air: dict[str, Any], hours: int = 24) -> list[dict[str, Any]]:
+    """Slice forecast entries from current hour onward.
+
+    Args:
+        air: Air quality data structure.
+        hours: Number of forward-looking forecast hours.
+
+    Returns:
+        List of hourly forecast dictionaries.
+    """
     return air["hourly"][air["now_index"]: air["now_index"] + hours]
 
 
 def _label_day(time_str: str, now_str: str) -> str:
+    """Label whether timestamp falls today or tomorrow.
+
+    Args:
+        time_str: Target ISO timestamp.
+        now_str: Current reference ISO timestamp.
+
+    Returns:
+        'today' or 'tomorrow'.
+    """
     return "today" if time_str[:10] == now_str[:10] else "tomorrow"
 
 
-def _hour(entry) -> int:
+def _hour(entry: dict[str, Any]) -> int:
+    """Extract integer hour from ISO timestamp entry.
+
+    Args:
+        entry: Forecast entry with 'time' key.
+
+    Returns:
+        Hour integer [0, 23].
+    """
     return int(entry["time"][11:13])
 
 
-def best_window(hours: list[dict], start_h: int = 6, end_h: int = 21, width: int = 2, worst: bool = False):
-    """Return the contiguous `width`-hour window within [start_h, end_h) with the lowest (or highest) mean AQI."""
+def best_window(
+    hours: list[dict[str, Any]],
+    start_h: int = 6,
+    end_h: int = 21,
+    width: int = 2,
+    worst: bool = False
+) -> dict[str, Any] | None:
+    """Find contiguous window with lowest (or highest) average AQI.
+
+    Args:
+        hours: Hourly forecast list.
+        start_h: Earliest allowable hour (inclusive).
+        end_h: Latest allowable hour (exclusive).
+        width: Window duration in hours.
+        worst: If True, finds the highest pollution window instead.
+
+    Returns:
+        Window dictionary with start, end, mean_aqi, and category, or None.
+    """
     cand = [h for h in hours if start_h <= _hour(h) < end_h and h["us_aqi"] is not None]
     best = None
     for i in range(len(cand) - width + 1):
@@ -125,8 +228,15 @@ def best_window(hours: list[dict], start_h: int = 6, end_h: int = 21, width: int
     return best
 
 
-def compute_trend(air: dict) -> dict:
-    """Compare the mean AQI of the next 6 h with the previous 6 h."""
+def compute_trend(air: dict[str, Any]) -> dict[str, Any]:
+    """Compare average AQI of next 6 hours with previous 6 hours.
+
+    Args:
+        air: Air quality payload containing hourly history and forecast.
+
+    Returns:
+        Trend dictionary with direction ('rising', 'improving', 'steady'), change value, and text.
+    """
     i, hourly = air["now_index"], air["hourly"]
     prev, nxt = _mean(h["us_aqi"] for h in hourly[max(0, i - 6):i]), _mean(h["us_aqi"] for h in hourly[i:i + 6])
     if prev is None or nxt is None:

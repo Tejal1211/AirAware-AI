@@ -2,57 +2,86 @@ import { useId } from 'react'
 import { AlertCircle, AlertTriangle, CheckCircle2, Clock, HelpCircle, Info, ShieldAlert, Sparkles, Tag, Zap } from 'lucide-react'
 import { TONE } from '../utils/format.js'
 
-export const Card = ({ title, icon: Icon, children, className = '', as: TagElement = 'section', ...rest }) => (
-  <TagElement className={`card ${className}`} {...rest}>
-    {title && (
-      <div className="mb-3 flex items-center gap-2">
-        {Icon && <Icon className="h-5 w-5 text-pine" aria-hidden="true" />}
-        <h2 className="text-lg font-bold text-ink">{title}</h2>
-      </div>
-    )}
-    {children}
-  </TagElement>
-)
+export const Card = ({ title, icon: Icon, children, className = '', as: TagElement = 'section', ...rest }) => {
+  const headingId = useId()
+  return (
+    <TagElement className={`card ${className}`} aria-labelledby={title ? headingId : undefined} {...rest}>
+      {title && (
+        <div className="mb-3 flex items-center gap-2">
+          {Icon && <Icon className="h-5 w-5 text-pine shrink-0" aria-hidden="true" />}
+          <h2 id={headingId} className="text-lg font-bold text-ink">{title}</h2>
+        </div>
+      )}
+      {children}
+    </TagElement>
+  )
+}
 
 export function Field({ label, hint, error, children, id }) {
+  const hintId = `${id}-hint`
+  const errorId = `${id}-error`
   return (
     <div>
       <label htmlFor={id} className="label">{label}</label>
       {children}
-      {hint && <p className="hint" id={`${id}-hint`}>{hint}</p>}
-      {error && <p className="err" role="alert">{error}</p>}
+      {hint && <p className="hint mt-1 text-xs text-slate-600" id={hintId}>{hint}</p>}
+      {error && <p className="err mt-1 text-xs font-semibold text-rose-700" id={errorId} role="alert">{error}</p>}
     </div>
   )
 }
 
-export function TextField({ label, hint, error, ...props }) {
-  const id = useId()
+export function TextField({ label, hint, error, id: propId, ...props }) {
+  const genId = useId()
+  const id = propId || genId
+  const describedBy = [hint ? `${id}-hint` : null, error ? `${id}-error` : null].filter(Boolean).join(' ') || undefined
   return (
     <Field label={label} hint={hint} error={error} id={id}>
-      <input id={id} className="input" aria-invalid={!!error} aria-describedby={hint ? `${id}-hint` : undefined} {...props} />
+      <input
+        id={id}
+        className="input focus-visible:ring-2 focus-visible:ring-pine focus-visible:outline-none"
+        aria-invalid={!!error}
+        aria-describedby={describedBy}
+        {...props}
+      />
     </Field>
   )
 }
 
-export function SelectField({ label, hint, error, options, ...props }) {
-  const id = useId()
+export function SelectField({ label, hint, error, options, id: propId, ...props }) {
+  const genId = useId()
+  const id = propId || genId
+  const describedBy = [hint ? `${id}-hint` : null, error ? `${id}-error` : null].filter(Boolean).join(' ') || undefined
   return (
     <Field label={label} hint={hint} error={error} id={id}>
-      <select id={id} className="input" aria-invalid={!!error} {...props}>
+      <select
+        id={id}
+        className="input focus-visible:ring-2 focus-visible:ring-pine focus-visible:outline-none"
+        aria-invalid={!!error}
+        aria-describedby={describedBy}
+        {...props}
+      >
         {options.map(([v, text]) => <option key={v} value={v}>{text}</option>)}
       </select>
     </Field>
   )
 }
 
-export function CheckField({ label, hint, ...props }) {
-  const id = useId()
+export function CheckField({ label, hint, id: propId, ...props }) {
+  const genId = useId()
+  const id = propId || genId
+  const hintId = `${id}-hint`
   return (
     <div className="flex min-h-[44px] items-start gap-3">
-      <input id={id} type="checkbox" className="mt-1 h-5 w-5 shrink-0 rounded border-mist text-pine accent-pine focus:ring-pine" {...props} />
-      <label htmlFor={id} className="text-base">
+      <input
+        id={id}
+        type="checkbox"
+        className="mt-1 h-5 w-5 shrink-0 rounded border-mist text-pine accent-pine focus:ring-pine focus-visible:ring-2 focus-visible:outline-none"
+        aria-describedby={hint ? hintId : undefined}
+        {...props}
+      />
+      <label htmlFor={id} className="text-base cursor-pointer">
         <span className="font-semibold text-ink">{label}</span>
-        {hint && <span className="hint block">{hint}</span>}
+        {hint && <span className="hint block text-xs text-slate-600" id={hintId}>{hint}</span>}
       </label>
     </div>
   )

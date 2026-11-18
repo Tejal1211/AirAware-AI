@@ -85,18 +85,39 @@ export default function App() {
         </div>
       </header>
 
-      {/* Navigation Bar with Lucide Icons */}
+      {/* Navigation Bar with WAI-ARIA Accessible Tablist */}
       {!showSetup && (
         <nav aria-label="Application Sections" className="sticky top-0 z-20 border-b border-mist bg-white shadow-xs">
-          <ul className="mx-auto flex max-w-6xl gap-1 overflow-x-auto px-4 scrollbar-none">
-            {TABS.map(([k, label, , TabIcon]) => {
+          <ul
+            role="tablist"
+            aria-label="AirAware Navigation Tabs"
+            className="mx-auto flex max-w-6xl gap-1 overflow-x-auto px-4 scrollbar-none"
+          >
+            {TABS.map(([k, label, , TabIcon], idx) => {
               const active = tab === k
               return (
-                <li key={k}>
+                <li key={k} role="presentation">
                   <button
+                    id={`tab-${k}`}
+                    role="tab"
+                    aria-selected={active}
+                    aria-controls={`panel-${k}`}
+                    tabIndex={active ? 0 : -1}
                     onClick={() => setTab(k)}
-                    aria-current={active ? 'page' : undefined}
-                    className={`flex min-h-[48px] items-center gap-2 whitespace-nowrap px-3.5 text-xs font-bold transition-colors ${
+                    onKeyDown={(e) => {
+                      if (e.key === 'ArrowRight') {
+                        e.preventDefault()
+                        const next = TABS[(idx + 1) % TABS.length][0]
+                        setTab(next)
+                        document.getElementById(`tab-${next}`)?.focus()
+                      } else if (e.key === 'ArrowLeft') {
+                        e.preventDefault()
+                        const prev = TABS[(idx - 1 + TABS.length) % TABS.length][0]
+                        setTab(prev)
+                        document.getElementById(`tab-${prev}`)?.focus()
+                      }
+                    }}
+                    className={`flex min-h-[48px] items-center gap-2 whitespace-nowrap px-3.5 text-xs font-bold transition-colors focus-visible:ring-2 focus-visible:ring-pine focus-visible:outline-none ${
                       active
                         ? 'border-b-2 border-pine text-pine-dark'
                         : 'border-b-2 border-transparent text-slate-600 hover:text-ink hover:bg-slate-100/60'
@@ -113,7 +134,7 @@ export default function App() {
       )}
 
       {/* Main Content Area */}
-      <main id="main" className="mx-auto w-full max-w-6xl flex-1 space-y-6 px-4 py-6">
+      <main id="main" role="main" className="mx-auto w-full max-w-6xl flex-1 space-y-6 px-4 py-6">
         <h1 ref={heading} tabIndex={-1} className="text-2xl font-black text-ink outline-none">
           {showSetup ? 'Personalized Household Onboarding' : tabItem[1]}
         </h1>
@@ -135,7 +156,7 @@ export default function App() {
             )}
           </>
         ) : (
-          <>
+          <div role="tabpanel" id={`panel-${tab}`} aria-labelledby={`tab-${tab}`} className="space-y-6">
             {demo && (
               <div role="note" className="flex flex-wrap items-center justify-between gap-3 rounded-xl border border-amber-300 bg-amber-50 p-3 text-xs font-semibold text-amber-900 shadow-xs">
                 <span>Displaying <b>SAMPLE DEMO DATA</b> for testing and evaluation.</span>
@@ -170,7 +191,7 @@ export default function App() {
                 onEditProfile={() => setEditing(true)}
               />
             )}
-          </>
+          </div>
         )}
       </main>
 

@@ -4,40 +4,74 @@ IMPORTANT: this measures how clear the *photo* looks (contrast, edge sharpness, 
 colour saturation). It does NOT measure AQI or PM2.5. Fog, night, indoor scenes, lens blur and filters
 all change the result.
 """
+from typing import Any
 import base64
 import os
 
 os.environ.setdefault("OPENCV_IO_MAX_IMAGE_PIXELS", str(30_000_000))  # guard against decompression bombs
 
 try:
-    import cv2  # noqa: E402
-    import numpy as np  # noqa: E402
-    CV2_AVAILABLE = True
-    _CV2_ERROR = None
+    import cv2
+    import numpy as np
+    CV2_AVAILABLE: bool = True
+    _CV2_ERROR: str | None = None
 except Exception as _e:
     cv2 = None
     np = None
     CV2_AVAILABLE = False
     _CV2_ERROR = str(_e)
 
-from ..errors import ApiError  # noqa: E402
+from ..errors import ApiError
 
-ALLOWED_EXTENSIONS = {"jpg", "jpeg", "png", "webp"}
-MAX_SIDE = 640
-DISCLAIMER = ("This is a visual clarity estimate from one photo. It does not measure AQI or PM2.5. "
-              "Fog, lighting, time of day, lens quality and filters all affect it.")
+ALLOWED_EXTENSIONS: set[str] = {"jpg", "jpeg", "png", "webp"}
+MAX_SIDE: int = 640
+DISCLAIMER: str = (
+    "This is a visual clarity estimate from one photo. It does not measure AQI or PM2.5. "
+    "Fog, lighting, time of day, lens quality and filters all affect it."
+)
 
 
 def has_valid_signature(data: bytes) -> bool:
-    """Check magic bytes so a renamed file cannot slip through on extension alone."""
-    return data[:3] == b"\xff\xd8\xff" or data[:8] == b"\x89PNG\r\n\x1a\n" or (data[:4] == b"RIFF" and data[8:12] == b"WEBP")
+    """Check magic bytes so a renamed file cannot slip through on extension alone.
+
+    Args:
+        data: Binary image payload.
+
+    Returns:
+        bool: True if signature matches JPG, PNG, or WebP.
+    """
+    return (
+        data[:3] == b"\xff\xd8\xff"
+        or data[:8] == b"\x89PNG\r\n\x1a\n"
+        or (data[:4] == b"RIFF" and data[8:12] == b"WEBP")
+    )
 
 
 def _clip01(x: float) -> float:
+    """Clamp a floating point number to the [0.0, 1.0] range.
+
+    Args:
+        x: Raw floating point number.
+
+    Returns:
+        float: Clamped value between 0.0 and 1.0.
+    """
     return float(min(1.0, max(0.0, x)))
 
 
-def _decode(data: bytes):
+def _decode(data: bytes) -> Any:
+    """Validate and decode uploaded image bytes into a resized BGR image matrix.
+
+    Args:
+        data: Raw binary image payload.
+
+    Returns:
+        numpy.ndarray: Decoded and scaled OpenCV image matrix.
+
+    Raises:
+        ApiError: If OpenCV is unavailable (503), invalid magic bytes (415),
+                 unreadable/corrupt image (422), or image is too small (422).
+    """
     if not CV2_AVAILABLE:
         raise ApiError(f"OpenCV image processing is unavailable ({_CV2_ERROR}). Please run: pip install 'numpy<2'", 503)
     if not has_valid_signature(data):
@@ -54,8 +88,18 @@ def _decode(data: bytes):
     return img
 
 
-def analyze_image(data: bytes) -> dict:
-    """Return visual-clarity metrics, a 0-100 score, plain-language findings and a dark-channel preview."""
+def analyze_image(data: bytes) -> dict[str, Any]:
+    """Calculate visual clarity metrics, score, findings, and dark-channel preview.
+
+    Args:
+        data: Raw binary image payload.
+
+    Returns:
+        dict: Analysis results containing clarity_score, tone, metrics, and base64 preview.
+
+    Raises:
+        ApiError: On format, decoding, or sizing failures.
+    """
     img = _decode(data)
     gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
     contrast = float(gray.std())                                     # RMS contrast, 0-~128
@@ -89,10 +133,18 @@ def analyze_image(data: bytes) -> dict:
     prev = cv2.resize(dark, (min(240, dark.shape[1]), max(1, int(dark.shape[0] * min(240, dark.shape[1]) / dark.shape[1]))), interpolation=cv2.INTER_AREA)
     ok, png = cv2.imencode(".png", cv2.applyColorMap(prev, cv2.COLORMAP_VIRIDIS))
     return {
-        "clarity_score": score, "label": label, "tone": tone, "summary": text, "notes": notes,
-        "metrics": {"contrast_rms": round(contrast, 1), "edge_sharpness": round(sharpness, 1),
-                    "dark_channel_mean": round(dark_mean, 3), "saturation_mean": round(saturation, 3),
-                    "brightness_mean": round(mean_brightness, 3)},
+        "clarity_score": score,
+        "label": label,
+        "tone": tone,
+        "summary": text,
+        "notes": notes,
+        "metrics": {
+            "contrast_rms": round(contrast, 1),
+            "edge_sharpness": round(sharpness, 1),
+            "dark_channel_mean": round(dark_mean, 3),
+            "saturation_mean": round(saturation, 3),
+            "brightness_mean": round(mean_brightness, 3)
+        },
         "component_scores": {k: round(v, 2) for k, v in parts.items()},
         "dark_channel_preview": "data:image/png;base64," + base64.b64encode(png.tobytes()).decode() if ok else None,
         "analyzed_size": {"width": int(img.shape[1]), "height": int(img.shape[0])},
