@@ -4,7 +4,7 @@
 
 AirAware AI combines **real air-quality data** (Open-Meteo), a **deterministic, explainable decision engine**, **Google Gemini** for natural-language answers, and **OpenCV** for a photo haze check. If Gemini is unavailable, the app still answers using the same rules, and says so.
 
-## What it does
+# What it does
 
 | Feature | Where | How it works |
 |---|---|---|
