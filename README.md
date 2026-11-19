@@ -72,7 +72,7 @@ flowchart TD
 
 **Request flow:** the browser sends the profile to `POST /api/plan`. The server validates it, fetches (cached) air data, runs the decision engine and returns one complete plan. All tabs read from that single response, so the app makes one air-data request per refresh.
 
-## Approach and working logic
+# Approach and working logic
 
 1. **Sensitivity rule.** Households with children, adults 65+, or someone with a heart/lung condition are treated one level more cautiously in the *Moderate* band (an assumed, conservative rule of thumb, not a clinical threshold).
 2. **Levels.** US AQI maps to good / moderate / caution (USG) / avoid (unhealthy) / stay in (very unhealthy and above).
