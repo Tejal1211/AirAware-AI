@@ -109,7 +109,7 @@ npm run dev                                              # http://localhost:5173
 
 **Single-process alternative:** `cd frontend && npm run build`, then run the backend. Flask serves `frontend/dist` at `http://127.0.0.1:5000`.
 
-**Gemini key:** create one at <https://aistudio.google.com/apikey> and put it in `backend/.env` as `GEMINI_API_KEY=...`. It is read only on the server and sent in a request header. `.env` is git-ignored. Without a key the app works with the rule-based fallback.
+*Gemini key:** create one at <https://aistudio.google.com/apikey> and put it in `backend/.env` as `GEMINI_API_KEY=...`. It is read only on the server and sent in a request header. `.env` is git-ignored. Without a key the app works with the rule-based fallback.
 
 ## Testing
 
